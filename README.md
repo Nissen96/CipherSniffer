@@ -36,13 +36,35 @@ The script defaults to detecting all supported algorithms.
 To target the search, `--filter` can be used with a comma-separated list of values.
 Any algorithm containing the value in its name will be run, so `md` matches both `MD4` and `MD5`.
 
+## Example
+
+![Example output for WinRAR.exe](example-output.png)
+
 ## Notes
 
 Detection is based on fixed constants often seen for each algorithm, such as the S-box in AES or round constants for SHA-256.
 
+### Search method
+
 The script searches for constants sequentially in the data, but they only need to be in order, not necessarily consecutive.
 If not consecutive, the match is marked as `(fragmented)`.'
 A match is considered consecutive if all values are within 256 bytes of the next to take padding etc. into account.
+
+Searching is done in both little-endian and big-endian mode, results being marked with `<LE>` or `<BE>`, respectively.
+
+Some algorithms share certain constants but also have their own individual.
+These are then grouped together, for example:
+```
+[MD4 / MD5 / SHA-1]
+  Init <LE>: 4/4
+  [MD4 / SHA-1] Consts: 0/2
+  [SHA-1] Consts: 0/4
+  [MD5] Consts <LE>: 64/64
+```
+Here, all three algorithms share the same initialization values, and with no further matches, it could be any of them.
+In this case, however, the specific constants for MD5 were also found.
+
+### Match reliability
 
 Full matches are more reliable than partial, consecutive more than fragmented, and long more than short.
 
