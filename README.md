@@ -2,7 +2,7 @@
 
 CipherSniffer helps automate the process of identifying cryptographic algorithms in binaries.
 
-It helps detect a number of ciphers, hash algorithms, and encoding schemes.
+It helps detect a number of ciphers, hash algorithms, and encoding schemes by making strategic searches for the cryptographic constants associated with the algorithm.
 
 ## Installation
 
@@ -17,7 +17,7 @@ python3 -m pip install tqdm
 ## Usage
 
 ```
-Usage: ciphersniffer.py [-h] [-p] [-f FILTER] [-l] [file]
+usage: ciphersniffer.py [-h] [-p] [-f FILTER] [-l] [-m MIN_CHUNK_SIZE] [file]
 
 Detect cryptographic algorithms in binary data
 
@@ -25,16 +25,21 @@ positional arguments:
   file                  Binary data file
 
 options:
-  -h, --help            Show this help message and exit
+  -h, --help            show this help message and exit
   -p, --progress        Show progress bars
-  -f FILTER, --filter FILTER
-                        Algorithm(s) to detect, e.g. 'cha,md,zip'
+  -f, --filter FILTER   Algorithm(s) to detect, e.g. 'cha,md,zip'
   -l, --list            List supported algorithms
+  -m, --min-chunk-size MIN_CHUNK_SIZE
+                        Minimum chunk size to split constants in (default: 4)
 ```
 
-The script defaults to detecting all supported algorithms.
+The script defaults to detecting all supported algorithms (list with `--list`).
+
 To target the search, `--filter` can be used with a comma-separated list of values.
 Any algorithm containing the value in its name will be run, so `md` matches both `MD4` and `MD5`.
+
+Search is repated with different splits of the cryptographic constants: 8, 4, 2, 1. Set the minimum chunk size with `--min-chunk-size`.
+Defaults to 4 to increase efficiency and decrease false positives - constants are also normally found either as one large block or as 4- or 8-byte chunks as part of instructions.
 
 ## Example
 
@@ -46,14 +51,16 @@ Detection is based on fixed constants often seen for each algorithm, such as the
 
 ### Search method
 
-The script searches for constants sequentially in the data, but they only need to be in order, not necessarily consecutive.
-If not consecutive, the match is marked as `(fragmented)`.'
-A match is considered consecutive if all values are within 256 bytes of the next to take padding etc. into account.
+The script searches for cryptographic constants *sequentially* in the data, allowing up to 256 bytes between each chunk. The constants do not need to be *contiguous*.
 
-Searching is done in both little-endian and big-endian mode, results being marked with `<LE>` or `<BE>`, respectively.
+To maximize coverage, the input is chunked into **1-**, **2-**, **4-**, and **8-byte** values and searched using both **little-endian** and **big-endian** formats. Each sequence is checked in both **forward** and **reverse** order.
 
-Some algorithms share certain constants but also have their own individual.
-These are then grouped together, for example:
+When a match is found, the script records the *type*, *length*, *offset*, and the *search parameters* used. If a constant is matched under multiple configurations, the best match is selected - defined as the longest match using the largest chunk size (e.g., 8-byte matches are more reliable than 2-byte ones).
+
+A match is considered **consecutive** if all chunks are found close together. A bit of slack is allowed to account for padding, move instructions, or alignment. If any chunk exceeds the allowed distance from the previous, the match is marked as **fragmented**.
+
+Many algorithms share core constants but also include unique ones. The script groups overlapping matches accordingly. For example:
+
 ```
 [MD4 / MD5 / SHA-1]
   Init <LE>: 4/4
@@ -61,21 +68,19 @@ These are then grouped together, for example:
   [SHA-1] Consts: 0/4
   [MD5] Consts <LE>: 64/64
 ```
-Here, all three algorithms share the same initialization values, and with no further matches, it could be any of them.
-In this case, however, the specific constants for MD5 were also found.
+
+In this case, the shared initialization values match all three algorithms. However, only the MD5-specific constants were found - making MD5 the likely candidate.
 
 ### Match reliability
 
-Full matches are more reliable than partial, consecutive more than fragmented, and long more than short.
+Match confidence is based on several factors, in order of importance:
 
-Green matches are full and consecutive, but if short might still be a false positive.
+- Full matches (all chunks found) > partial matches
+- Larger chunk sizes > smaller (false positives are rarer with 8-byte matches than 2-byte)
+- Consecutive matches > fragmented
 
-Yellow matches are partial or fragmented, but can still be valid.
+🟢 Green results: Full, consecutive match - high confidence. *Can* be a false positive if chunk size is small.
 
-- *Example:* Searching for `ABC` in `.A...ABC..`, the matches found are `.A....BC..` although the sequence exists consecutively.
+🟡 Yellow results: Partial match, but either long, consecutive, or found with a large chunk size.
 
-Checking each combination would decrease the speed dramatically, and the result can just be verified manually instead.
-
-## Contributing
-
-Contributions are welcome. To contribute, please fork the project, develop your feature on a new branch, and create a new pull request with the changes.
+🔴 Red results: Either no match, or a match considered likely to be a false positive.
